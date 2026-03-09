@@ -1,7 +1,9 @@
 import { expect, test, ElectronApplication, Page } from '@playwright/test';
 
+import { ContainerInfoPage } from './pages/container-info-page';
 import { ContainerLogsPage } from './pages/container-logs-page';
 import { ContainerShellPage } from './pages/container-shell-page';
+import { ContainerStatsPage } from './pages/container-stats-page';
 import { ContainersPage } from './pages/containers-page';
 import { NavPage } from './pages/nav-page';
 import { startSlowerDesktop, teardown, tool } from './utils/TestUtils';
@@ -75,6 +77,9 @@ test.describe.serial('Containers Tests', () => {
   });
 
   test('should display container logs page', async() => {
+    // The info page now defaults to the Info tab; navigate to Logs explicitly.
+    await page.getByTestId('tab-logs').click();
+
     const containerLogsPage = new ContainerLogsPage(page);
 
     await expect(containerLogsPage.containerInfo).toBeVisible();
@@ -171,6 +176,8 @@ test.describe.serial('Containers Tests', () => {
         timeout: 10_000,
       });
 
+      await page.getByTestId('tab-logs').click();
+
       const containerLogsPage = new ContainerLogsPage(page);
       await containerLogsPage.waitForLogsToLoad();
 
@@ -229,6 +236,8 @@ test.describe.serial('Containers Tests', () => {
       await page.waitForURL(`**/containers/info/${ longRunningContainerId }**`, {
         timeout: 10000,
       });
+
+      await page.getByTestId('tab-logs').click();
 
       const containerLogsPage = new ContainerLogsPage(page);
       await containerLogsPage.waitForLogsToLoad();
@@ -407,5 +416,220 @@ test.describe.serial('Container Shell Tab', () => {
     // The unsupported banner must appear and the terminal must not be rendered.
     await expect(shellPage.unsupportedBanner).toBeVisible({ timeout: 15_000 });
     await expect(shellPage.terminal).not.toBeVisible();
+  });
+});
+
+test.describe.serial('Container Info Tab', () => {
+  let electronApp: ElectronApplication;
+  let infoContainerId: string;
+
+  test.beforeAll(async({ colorScheme }, testInfo) => {
+    [electronApp, page] = await startSlowerDesktop(testInfo, {
+      kubernetes:      { enabled: false },
+      containerEngine: { name: ContainerEngine.MOBY, allowedImages: { enabled: false } },
+    });
+
+    const navPage = new NavPage(page);
+    await navPage.progressBecomesReady();
+
+    // Run a named alpine container with a known env var so we can assert on it.
+    const output = await tool(
+      'docker', 'run', '--detach',
+      '--env', 'RDTEST_VAR=hello',
+      '--name', `rdtest-info-${ Date.now() }`,
+      'alpine', 'sleep', 'infinity',
+    );
+    infoContainerId = output.trim();
+
+    const navPage2 = new NavPage(page);
+    await navPage2.navigateTo('Containers');
+    const containersPage = new ContainersPage(page);
+    await containersPage.waitForTableToLoad();
+    await containersPage.waitForContainerToAppear(infoContainerId);
+    await containersPage.clickContainerAction(infoContainerId, 'info');
+    await page.waitForURL(`**/containers/info/${ infoContainerId }**`, { timeout: 10_000 });
+  });
+
+  test.afterAll(async({ colorScheme }, testInfo) => {
+    if (infoContainerId) {
+      try {
+        await tool('docker', 'rm', '-f', infoContainerId);
+      } catch {}
+    }
+    await teardown(electronApp, testInfo);
+  });
+
+  test('Info tab is the default and active tab', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    await expect(infoPage.tab).toHaveClass(/\bactive\b/);
+  });
+
+  test('summary table shows key container fields', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    await infoPage.waitForData();
+
+    // ID should be exactly 12 hex chars.
+    const id = await infoPage.getSummaryValue('info-row-id');
+
+    expect(id).toMatch(/^[a-f0-9]{12}$/);
+
+    // Name should not start with '/'.
+    const name = await infoPage.getSummaryValue('info-row-name');
+
+    expect(name).not.toMatch(/^\//);
+
+    // Image row should be non-empty.
+    const image = await infoPage.getSummaryValue('info-row-image');
+
+    expect(image).not.toBe('');
+  });
+
+  test('summary table shows IP address', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    // IP row is always rendered; value is either an IP or '—'.
+    const ip = await infoPage.getSummaryValue('info-row-ip');
+
+    expect(ip).not.toBe('');
+  });
+
+  test('ports section is always visible', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    // The alpine container has no published ports, but the section must still render.
+    await expect(infoPage.portsSection).toBeVisible();
+    await infoPage.portsSection.locator('summary').click();
+    await expect(infoPage.portsSection).toHaveAttribute('open');
+    await expect(infoPage.portsSection).toContainText('None');
+  });
+
+  test('mounts section can be expanded', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    await infoPage.mountsSection.locator('summary').click();
+    // After opening the <details>, the section body should appear.
+    await expect(infoPage.mountsSection).toHaveAttribute('open');
+  });
+
+  test('env section shows RDTEST_VAR in monospace list', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    await infoPage.envSection.locator('summary').click();
+    await expect(infoPage.envSection).toHaveAttribute('open');
+    await expect(infoPage.envSection).toContainText('RDTEST_VAR=hello');
+  });
+
+  test('switching to Logs tab and back preserves Info data', async() => {
+    const infoPage = new ContainerInfoPage(page);
+
+    await page.getByTestId('tab-logs').click();
+    await infoPage.clickTab();
+    await infoPage.waitForData();
+
+    // Summary table must still be populated after round-trip.
+    const id = await infoPage.getSummaryValue('info-row-id');
+
+    expect(id).toMatch(/^[a-f0-9]{12}$/);
+  });
+});
+
+test.describe.serial('Container Stats Tab', () => {
+  let electronApp: ElectronApplication;
+  let runningContainerId: string;
+  let stoppedContainerId: string;
+
+  test.beforeAll(async({ colorScheme }, testInfo) => {
+    [electronApp, page] = await startSlowerDesktop(testInfo, {
+      kubernetes:      { enabled: false },
+      containerEngine: { name: ContainerEngine.MOBY, allowedImages: { enabled: false } },
+    });
+
+    const navPage = new NavPage(page);
+    await navPage.progressBecomesReady();
+
+    // Long-running container for the "running" tests.
+    const runOutput = await tool('docker', 'run', '--detach', 'alpine', 'sleep', 'infinity');
+
+    runningContainerId = runOutput.trim();
+
+    // Stopped container (exits immediately).
+    const stopOutput = await tool('docker', 'run', '--detach', 'alpine', 'echo', 'done');
+
+    stoppedContainerId = stopOutput.trim();
+    // Give it a moment to exit.
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+  });
+
+  test.afterAll(async({ colorScheme }, testInfo) => {
+    for (const id of [runningContainerId, stoppedContainerId]) {
+      if (id) {
+        try {
+          await tool('docker', 'rm', '-f', id);
+        } catch {}
+      }
+    }
+    await teardown(electronApp, testInfo);
+  });
+
+  async function navigateToStatsTab(containerId: string): Promise<ContainerStatsPage> {
+    const navPage = new NavPage(page);
+    await navPage.navigateTo('Containers');
+    const containersPage = new ContainersPage(page);
+    await containersPage.waitForTableToLoad();
+    await containersPage.waitForContainerToAppear(containerId);
+    await containersPage.clickContainerAction(containerId, 'info');
+    await page.waitForURL(`**/containers/info/${ containerId }**`, { timeout: 10_000 });
+    const statsPage = new ContainerStatsPage(page);
+    await statsPage.clickTab();
+
+    return statsPage;
+  }
+
+  test('Stats tab appears between Info and Logs', async() => {
+    const navPage = new NavPage(page);
+    await navPage.navigateTo('Containers');
+    const containersPage = new ContainersPage(page);
+    await containersPage.waitForTableToLoad();
+    await containersPage.waitForContainerToAppear(runningContainerId);
+    await containersPage.clickContainerAction(runningContainerId, 'info');
+    await page.waitForURL(`**/containers/info/${ runningContainerId }**`, { timeout: 10_000 });
+
+    const tabs = page.locator('.tabs li.tab');
+    const tabTexts = await tabs.allTextContents();
+    const names = tabTexts.map((t: string) => t.trim());
+
+    const infoIdx = names.findIndex((n: string) => n === 'Info');
+    const statsIdx = names.findIndex((n: string) => n === 'Stats');
+    const logsIdx = names.findIndex((n: string) => n === 'Logs');
+
+    expect(infoIdx).toBeGreaterThanOrEqual(0);
+    expect(statsIdx).toBeGreaterThan(infoIdx);
+    expect(logsIdx).toBeGreaterThan(statsIdx);
+  });
+
+  test('charts render on a running container', async() => {
+    const statsPage = await navigateToStatsTab(runningContainerId);
+    await statsPage.waitForCharts();
+  });
+
+  test('process table shows at least one row', async() => {
+    const statsPage = new ContainerStatsPage(page);
+    await expect(statsPage.processTable.locator('tbody tr').first()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('refresh rate select has the correct options', async() => {
+    const statsPage = new ContainerStatsPage(page);
+    const options = await statsPage.refreshSelect.locator('option').allTextContents();
+
+    expect(options).toEqual(['1 s', '5 s', '10 s', '20 s', '30 s', '1 min']);
+  });
+
+  test('stopped container shows not-running banner', async() => {
+    const statsPage = await navigateToStatsTab(stoppedContainerId);
+
+    await expect(statsPage.notRunningBanner).toBeVisible({ timeout: 10_000 });
+    await expect(statsPage.cpuChart).not.toBeVisible();
   });
 });
