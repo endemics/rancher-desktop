@@ -164,9 +164,9 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 defineOptions({ name: 'ContainerStats' });
 
 const props = defineProps<{
-  containerId: string;
+  containerId:         string;
   isContainerRunning?: boolean;
-  namespace?: string;
+  namespace?:          string;
 }>();
 
 const MAX_POINTS = 60;
@@ -232,30 +232,30 @@ function parsePair(s: string): [number, number] {
 function dataset(label: string, data: number[], color: string) {
   return {
     label,
-    data: [...data],
-    borderColor: color,
+    data:            [...data],
+    borderColor:     color,
     backgroundColor: color + '33',
-    borderWidth: 2,
-    pointRadius: 0,
-    fill: true,
-    tension: 0.3,
+    borderWidth:     2,
+    pointRadius:     0,
+    fill:            true,
+    tension:         0.3,
   };
 }
 
 // ── Computed chart data ────────────────────────────────────────────────────
 
 const cpuChartData = computed(() => ({
-  labels: [...labels.value],
+  labels:   [...labels.value],
   datasets: [dataset('CPU %', cpuData.value, '#4e9af1')],
 }));
 
 const memChartData = computed(() => ({
-  labels: [...labels.value],
+  labels:   [...labels.value],
   datasets: [dataset('Memory', memData.value, '#f1a14e')],
 }));
 
 const netChartData = computed(() => ({
-  labels: [...labels.value],
+  labels:   [...labels.value],
   datasets: [
     dataset('RX', netRxData.value, '#4ef185'),
     dataset('TX', netTxData.value, '#f14e4e'),
@@ -263,7 +263,7 @@ const netChartData = computed(() => ({
 }));
 
 const ioChartData = computed(() => ({
-  labels: [...labels.value],
+  labels:   [...labels.value],
   datasets: [
     dataset('Read', blockRData.value, '#9b4ef1'),
     dataset('Write', blockWData.value, '#f1e84e'),
@@ -295,11 +295,11 @@ function readColors() {
 // ── Chart options ──────────────────────────────────────────────────────────
 
 const baseOptions = computed(() => ({
-  animation: false as const,
-  responsive: true,
+  animation:           false as const,
+  responsive:          true,
   maintainAspectRatio: false,
-  interaction: { mode: 'index' as const, intersect: false },
-  scales: {
+  interaction:         { mode: 'index' as const, intersect: false },
+  scales:              {
     x: { display: false },
     y: { beginAtZero: true, ticks: { color: textColor.value }, grid: { color: gridColor.value } },
   },

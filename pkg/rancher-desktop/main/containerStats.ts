@@ -100,7 +100,7 @@ export class ContainerStatsHandler {
       };
 
       const session: StatsSession = {
-        timer: setInterval(() => { poll().catch(console.error) }, intervalSeconds * 1_000),
+        timer:  setInterval(() => { poll().catch(console.error) }, intervalSeconds * 1_000),
         sender: event.sender,
         namespace,
       };
