@@ -623,7 +623,7 @@ test.describe.serial('Container Stats Tab', () => {
     const statsPage = new ContainerStatsPage(page);
     const options = await statsPage.refreshSelect.locator('option').allTextContents();
 
-    expect(options).toEqual(['5 s', '10 s', '20 s', '30 s', '1 min']);
+    expect(options).toEqual(['1 s', '5 s', '10 s', '20 s', '30 s', '1 min']);
   });
 
   test('stopped container shows not-running banner', async() => {
